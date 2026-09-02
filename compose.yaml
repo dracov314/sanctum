@@ -1,0 +1,76 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: sanctum
+      POSTGRES_USER: sanctum
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d sanctum -U sanctum"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+
+  api:
+    build: ./api
+    restart: always
+    env_file: .env
+    environment:
+      # Fail `docker compose up` early with a clear message if these are unset,
+      # rather than booting an insecure instance. The rest come from .env.
+      SECRET_KEY: "${SECRET_KEY:?SECRET_KEY must be set in .env - run ./setup.sh}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - campaign_files:/data/campaign_files
+      - book_thumbnails:/data/book_thumbnails
+      - page_cache:/data/page_cache
+      - library:/library
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    read_only: true
+    tmpfs: [/tmp]
+
+  frontend:
+    build: ./frontend
+    restart: always
+    ports:
+      - "${SANCTUM_PORT:-8080}:80"
+    depends_on:
+      - api
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+
+  # Optional Discord bot — session-room roll relay + session logging.
+  # Enable with:  docker compose --profile bot up -d
+  bot:
+    build: ./bot
+    restart: always
+    env_file: .env
+    environment:
+      SANCTUM_API_URL: http://api:8000/api
+    depends_on:
+      - api
+    profiles: ["bot"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    read_only: true
+    tmpfs: [/tmp]
+
+volumes:
+  postgres_data:
+  campaign_files:
+  book_thumbnails:
+  page_cache:
+  library:

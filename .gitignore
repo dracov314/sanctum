@@ -1,0 +1,26 @@
+# secrets / local state
+.env
+.env.*
+!.env.example
+compose.override.yaml
+compose.*.yaml
+!compose.yaml
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# flutter / dart
+frontend/build/
+frontend/.dart_tool/
+**/.dart_tool/
+frontend/.flutter-plugins
+frontend/.flutter-plugins-dependencies
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

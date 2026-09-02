@@ -1,0 +1,64 @@
+name: sanctum
+description: "Sanctum — TTRPG platform for library, campaigns, and session tools."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.12.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_web_plugins:
+    sdk: flutter
+
+  # State & routing
+  flutter_riverpod: ^2.6.1
+  go_router: ^14.0.0
+
+  # HTTP & auth
+  http: ^1.2.2
+  http_parser: ^4.1.2  # MediaType for multipart upload content-types (portrait upload)
+
+  # Markdown renderer (for wiki pages & session notes)
+  flutter_markdown: ^0.7.7
+  markdown: ^7.3.1
+
+  # Misc UI
+  cupertino_icons: ^1.0.8
+  cached_network_image: ^3.4.1
+  intl: ^0.20.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/sanctum_logo.png
+    - assets/sanctum_icon.png
+    - assets/sanctum_banner.jpeg
+    - assets/sanctum_navbar_icon.png
+  # Bundled locally so body text never depends on Flutter Web's runtime
+  # Google-Fonts auto-fetch for the unbundled Material default ("Roboto") —
+  # that fetch silently fails (and takes all text on the page down with it)
+  # for anyone whose browser/extensions block fonts.gstatic.com, which is a
+  # very ordinary privacy-tool default, not an edge case.
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: assets/fonts/Roboto-Regular.ttf
+        - asset: assets/fonts/Roboto-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Roboto-Bold.ttf
+          weight: 700
+    # Toggleable "fantasy scroll" font for the Fuzion character sheet — same
+    # reasoning as Roboto above, bundled locally rather than referencing a
+    # Google Fonts family name Flutter Web would try to fetch at runtime.
+    - family: IMFellEnglish
+      fonts:
+        - asset: assets/fonts/IMFellEnglish-Regular.ttf
+        - asset: assets/fonts/IMFellEnglish-Italic.ttf
+          style: italic

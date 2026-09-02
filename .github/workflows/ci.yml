@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: flutter analyze
+    runs-on: ubuntu-latest
+    container: ghcr.io/cirruslabs/flutter:stable
+    steps:
+      - uses: actions/checkout@v4
+      - name: flutter pub get
+        working-directory: frontend
+        run: flutter pub get
+      - name: flutter analyze
+        working-directory: frontend
+        run: flutter analyze --no-fatal-infos
+
+  images:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build API image
+        run: docker build -t sanctum-api ./api
+      - name: Build frontend image
+        run: docker build -t sanctum-frontend ./frontend
+      - name: Build bot image
+        run: docker build -t sanctum-bot ./bot
