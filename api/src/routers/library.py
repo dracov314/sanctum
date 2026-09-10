@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 import io
 import re
 import mimetypes
@@ -7,7 +6,6 @@ import zipfile
 from pathlib import Path
 from typing import Optional
 import fitz  # PyMuPDF
-from PIL import Image
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
@@ -20,9 +18,18 @@ from ..auth import get_current_user, require_admin
 from ..config import settings
 from .. import book_indexing as indexing
 from .. import library_scan
+from ..uploads import read_upload_capped
 from ..pdf_render import render_pdf_page, get_pdf_page_words
 
 router = APIRouter(prefix="/library", tags=["library"])
+
+
+async def require_library_download(user: User = Depends(get_current_user)) -> User:
+    """Gate for raw-PDF / whole-system-ZIP egress. Reading (page renders,
+    search, TOC) is never gated by this — only bulk file access."""
+    if settings.library_download_policy == "all" or user.is_admin:
+        return user
+    raise HTTPException(403, "Downloading library files is restricted to admins on this instance")
 
 
 def _thumb_slug(filename: str) -> str:
@@ -195,12 +202,15 @@ def _zip_stream(files: list[tuple[Path, str]]):
     yield buf.drain()  # central directory
 
 
-@router.get("/systems/{system_id}/download")
+@router.get("/systems/{system_id}/download",
+            dependencies=[Depends(require_library_download)])
 async def download_system(
     system_id: str,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
 ):
+    # Bulk export of every book in a system — gated by LIBRARY_DOWNLOAD_POLICY
+    # (admin-only by default; "all" on a trusted private instance). Reading
+    # stays open via the reader regardless.
     system = await db.get(GameSystem, system_id)
     if not system:
         raise HTTPException(404, "System not found")
@@ -475,12 +485,16 @@ async def update_book_metadata(
     return {"ok": True}
 
 
-@router.get("/books/{book_id}/file")
+@router.get("/books/{book_id}/file", dependencies=[Depends(require_library_download)])
 async def get_book_file(
     book_id: str,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
 ):
+    # Raw PDF egress — gated by LIBRARY_DOWNLOAD_POLICY (admin-only by default).
+    # Regular users read via the server-rendered page images
+    # (`/books/{id}/page/{n}`), which stay open; the reader's native-PDF iframe
+    # mode also uses this endpoint, so where it's admin-only the reader falls
+    # back to image mode for everyone else.
     book = await db.get(Book, book_id)
     if not book:
         raise HTTPException(404, "Book not found")
@@ -710,7 +724,7 @@ async def upload_book(
     dest = dest_dir / safe_name
     if dest.exists():
         raise HTTPException(409, "A book with that filename already exists in this system")
-    dest.write_bytes(await file.read())
+    dest.write_bytes(await read_upload_capped(file, settings.max_book_upload_mb))
 
     stats = await library_scan.scan_new_books(db, metadata_mode="new")
     asyncio.create_task(indexing.scan_and_index())

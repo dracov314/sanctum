@@ -76,6 +76,46 @@ final systemBooksProvider = FutureProvider.family<Map<String, dynamic>, SystemBo
   return data;
 });
 
+// ── Book category taxonomy ──────────────────────────────────────────────────
+// Shared by the Library's per-system landing page and the session room's
+// Fuzion Resources panel, which mirrors that layout.
+
+const kBookCategoryOrder = [
+  'core', 'supplement', 'adventure', 'character-sheet', 'setting', 'reference',
+  'homebrew', 'unofficial', 'the-rifter', 'world-books', 'dimension-books',
+  'coalition-war', 'cenotaphium',
+];
+
+String bookCategoryLabel(String? cat) => switch (cat) {
+      'core' => 'Core Rulebooks', 'supplement' => 'Supplements', 'adventure' => 'Adventures',
+      'character-sheet' => 'Character Sheets', 'setting' => 'Setting Books', 'reference' => 'Reference',
+      'homebrew' => 'Homebrew', 'unofficial' => 'Unofficial', 'the-rifter' => 'The Rifter',
+      'world-books' => 'World Books', 'dimension-books' => 'Dimension Books',
+      'coalition-war' => 'Coalition Wars', 'cenotaphium' => 'Cenotaphium',
+      _ => cat ?? 'Uncategorized',
+    };
+
+int bookCategoryRank(String? cat) {
+  final i = kBookCategoryOrder.indexOf(cat ?? '');
+  return i < 0 ? 99 : i;
+}
+
+/// Groups a flat book list into `[(category, books)]`, ordered by
+/// [bookCategoryRank] then category label. Books inside each group keep the
+/// order they arrived in.
+List<MapEntry<String?, List<Map<String, dynamic>>>> groupBooksByCategory(
+    List<Map<String, dynamic>> books) {
+  final groups = <String?, List<Map<String, dynamic>>>{};
+  for (final b in books) {
+    groups.putIfAbsent(b['category'] as String?, () => []).add(b);
+  }
+  return groups.entries.toList()
+    ..sort((a, b) {
+      final r = bookCategoryRank(a.key).compareTo(bookCategoryRank(b.key));
+      return r != 0 ? r : bookCategoryLabel(a.key).compareTo(bookCategoryLabel(b.key));
+    });
+}
+
 // Searches one book's own extracted page text (real full-document search, not
 // just title/metadata) — powers the in-reader search panel.
 final bookPageSearchProvider =

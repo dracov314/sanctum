@@ -17,10 +17,12 @@ from ..database import get_db
 from ..models import (
     Campaign, CampaignMember, CampaignCategory, CampaignFile, CampaignInvite,
     SessionNote, GMSessionNote, PlayerSessionNote, SessionPoll, SessionPollResponse,
-    WikiPage, WikiTemplate, CampaignResource, User, FuzionSessionLog, GameSystem,
+    WikiPage, WikiTemplate, WikiRevision, CampaignResource, User,
+    FuzionSessionLog, GameSystem,
 )
 from ..auth import get_current_user
 from ..config import settings
+from ..uploads import read_upload_capped
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
@@ -206,7 +208,7 @@ async def _my_member_row(campaign_id: str, user: User, db: AsyncSession) -> Opti
 
     Unlike _get_campaign_as_member, this doesn't short-circuit to None for the
     campaign owner — an owner can also hold their own player-role member row
-    (e.g. dracov in the One Piece campaign, who owns it but plays Luna), and
+    (a GM who owns a campaign but also plays a character in it), and
     self-service /members/me endpoints need that specific row, not just
     permission-to-act on the campaign in general.
     """
@@ -1072,19 +1074,148 @@ async def update_wiki_page(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    campaign, _ = await _get_campaign_as_member(campaign_id, user, db)
+    campaign, member = await _get_campaign_as_member(campaign_id, user, db)
     page = await db.get(WikiPage, page_id)
     if not page or page.campaign_id != campaign_id:
         raise HTTPException(404)
+    is_gm = _is_gm(campaign, member, user)
+
     # exclude_unset (not exclude_none): parent_id must be nullable via PATCH
     # to move a page back to top level, which exclude_none would silently drop.
     updates = body.model_dump(exclude_unset=True)
+
+    # Only the GM/owner may change a page's GM-only visibility.
+    if "is_gm_only" in updates and updates["is_gm_only"] != page.is_gm_only and not is_gm:
+        raise HTTPException(403, "Only the GM can change a page's visibility")
+
+    # Snapshot the substantive fields before mutating, so an edit by someone
+    # other than the original author can be raised for that author's review.
+    before = {"title": page.title, "content": page.content, "is_gm_only": page.is_gm_only}
+
     if "title" in updates:
         updates["slug"] = _slugify(updates["title"])
     for field, value in updates.items():
         setattr(page, field, value)
+
+    substantive_change = any(
+        k in updates and updates[k] != before[k] for k in ("title", "content", "is_gm_only")
+    )
+    if substantive_change and page.author_id and page.author_id != user.id:
+        reviewer_id = page.author_id
+        if not await db.get(User, reviewer_id):
+            reviewer_id = campaign.owner_id
+        db.add(WikiRevision(
+            page_id=page.id, campaign_id=campaign_id,
+            editor_id=user.id, reviewer_id=reviewer_id,
+            prev_title=before["title"], prev_content=before["content"],
+            prev_is_gm_only=before["is_gm_only"],
+            new_title=page.title, new_content=page.content,
+            new_is_gm_only=page.is_gm_only,
+        ))
+
     await db.commit()
     return {"ok": True}
+
+
+# ── Wiki edit review (author veto) ────────────────────────────────────────────
+
+def _revision_out(r: WikiRevision, page_title: Optional[str], editor_name: Optional[str]) -> dict:
+    return {
+        "id": r.id,
+        "page_id": r.page_id,
+        "page_title": page_title,
+        "editor_id": r.editor_id,
+        "editor_name": editor_name,
+        "status": r.status,
+        "prev": {"title": r.prev_title, "content": r.prev_content, "is_gm_only": r.prev_is_gm_only},
+        "new": {"title": r.new_title, "content": r.new_content, "is_gm_only": r.new_is_gm_only},
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "resolved_at": r.resolved_at.isoformat() if r.resolved_at else None,
+    }
+
+
+@router.get("/{campaign_id}/wiki/revisions")
+async def list_wiki_revisions(
+    campaign_id: str,
+    status: str = "pending",
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Pending edits awaiting the caller's review. The GM/owner sees every
+    pending review in the campaign; a player sees only their own pages'."""
+    campaign, member = await _get_campaign_as_member(campaign_id, user, db)
+    is_gm = _is_gm(campaign, member, user)
+    stmt = (
+        select(WikiRevision, WikiPage.title, User.display_name, User.username)
+        .outerjoin(WikiPage, WikiPage.id == WikiRevision.page_id)
+        .outerjoin(User, User.id == WikiRevision.editor_id)
+        .where(WikiRevision.campaign_id == campaign_id)
+        .order_by(WikiRevision.created_at.desc())
+    )
+    if status in ("pending", "kept", "reverted"):
+        stmt = stmt.where(WikiRevision.status == status)
+    if not is_gm:
+        stmt = stmt.where(WikiRevision.reviewer_id == user.id)
+    rows = (await db.execute(stmt)).all()
+    return [
+        _revision_out(r, title, dname or uname)
+        for r, title, dname, uname in rows
+    ]
+
+
+async def _resolve_revision(
+    campaign_id: str, rev_id: str, user: User, db: AsyncSession
+) -> tuple[Campaign, WikiRevision]:
+    campaign, member = await _get_campaign_as_member(campaign_id, user, db)
+    rev = await db.get(WikiRevision, rev_id)
+    if not rev or rev.campaign_id != campaign_id:
+        raise HTTPException(404)
+    if rev.status != "pending":
+        raise HTTPException(409, "This edit has already been reviewed")
+    if rev.reviewer_id != user.id and not _is_gm(campaign, member, user):
+        raise HTTPException(403, "Only the page's original author (or the GM) can review this")
+    return campaign, rev
+
+
+@router.post("/{campaign_id}/wiki/revisions/{rev_id}/keep")
+async def keep_wiki_revision(
+    campaign_id: str,
+    rev_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    _, rev = await _resolve_revision(campaign_id, rev_id, user, db)
+    rev.status = "kept"
+    rev.resolved_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"ok": True, "status": "kept"}
+
+
+@router.post("/{campaign_id}/wiki/revisions/{rev_id}/revert")
+async def revert_wiki_revision(
+    campaign_id: str,
+    rev_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    _, rev = await _resolve_revision(campaign_id, rev_id, user, db)
+    page = await db.get(WikiPage, rev.page_id)
+    if not page:
+        raise HTTPException(404, "The page no longer exists")
+    # Don't clobber a newer edit made after this one.
+    if page.content != rev.new_content or page.title != rev.new_title:
+        raise HTTPException(
+            409,
+            "The page has changed since this edit — review the newer change instead",
+        )
+    page.title = rev.prev_title
+    page.slug = _slugify(rev.prev_title or "")
+    page.content = rev.prev_content
+    page.is_gm_only = bool(rev.prev_is_gm_only)
+    rev.status = "reverted"
+    rev.resolved_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"ok": True, "status": "reverted"}
 
 
 @router.delete("/{campaign_id}/wiki/{page_id}", status_code=204)
@@ -1269,7 +1400,7 @@ async def import_wiki_markdown(
     if suffix not in (".md", ".markdown"):
         raise HTTPException(400, "Only .md/.markdown files are supported")
     title = re.sub(r"[-_]+", " ", Path(file.filename).stem).strip() or "Untitled"
-    content = (await file.read()).decode("utf-8", errors="replace")
+    content = (await read_upload_capped(file, settings.max_upload_mb)).decode("utf-8", errors="replace")
     page = WikiPage(
         campaign_id=campaign_id, author_id=user.id, title=title,
         slug=_slugify(title), content=content, is_gm_only=False, parent_id=None,
@@ -1422,7 +1553,7 @@ async def upload_file(
     dest_dir.mkdir(parents=True, exist_ok=True)
     safe_name = f"{uuid.uuid4().hex}_{Path(file.filename).name}"
     dest = dest_dir / safe_name
-    content = await file.read()
+    content = await read_upload_capped(file, settings.max_upload_mb)
     dest.write_bytes(content)
     mime = file.content_type or mimetypes.guess_type(file.filename)[0] or "application/octet-stream"
     cf = CampaignFile(
@@ -1445,8 +1576,10 @@ async def download_file(
     campaign_id: str,
     file_id: str,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
+    # Confirmed campaign members only (admins pass) — same gate as list_files.
+    await _get_campaign_as_member(campaign_id, user, db)
     cf = await db.get(CampaignFile, file_id)
     if not cf or cf.campaign_id != campaign_id:
         raise HTTPException(404)
@@ -1492,7 +1625,7 @@ async def upload_banner(
         old.unlink()
     ext = Path(file.filename).suffix or ""
     dest = dest_dir / f"banner{ext}"
-    dest.write_bytes(await file.read())
+    dest.write_bytes(await read_upload_capped(file, settings.max_upload_mb))
     campaign.banner_url = f"/api/campaigns/{campaign_id}/banner"
     await db.commit()
     return {"banner_url": campaign.banner_url}
@@ -1536,7 +1669,7 @@ async def upload_my_character_sheet(
         old.unlink()
     ext = Path(file.filename).suffix or ""
     dest = dest_dir / f"{member.id}{ext}"
-    dest.write_bytes(await file.read())
+    dest.write_bytes(await read_upload_capped(file, settings.max_upload_mb))
     member.character_sheet_url = f"/api/campaigns/{campaign_id}/members/{member.id}/character-sheet"
     await db.commit()
     return {"character_sheet_url": member.character_sheet_url}

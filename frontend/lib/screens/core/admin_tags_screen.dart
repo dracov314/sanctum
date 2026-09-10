@@ -102,7 +102,7 @@ class _TagRow extends ConsumerWidget {
         TextButton(
           onPressed: () async {
             final to = await _promptRename(context, tag);
-            if (to != null && to.isNotEmpty && to != tag) {
+            if (to != null && to.isNotEmpty && to != tag && context.mounted) {
               await _run(context, ref, n.rename(tag, to));
             }
           },
@@ -128,7 +128,9 @@ class _TagRow extends ConsumerWidget {
                 ],
               ),
             );
-            if (ok == true) await _run(context, ref, n.remove(tag));
+            if (ok == true && context.mounted) {
+              await _run(context, ref, n.remove(tag));
+            }
           },
         ),
       ]),

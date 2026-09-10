@@ -41,7 +41,7 @@ class JoinInviteScreen extends ConsumerWidget {
                   padding: EdgeInsets.all(20),
                   child: CircularProgressIndicator(color: kAccent),
                 ),
-                error: (_, __) => const _Dead(),
+                error: (_, _) => const _Dead(),
                 data: (p) => (p['valid'] == true)
                     ? _ValidInvite(token: token, preview: p)
                     : _Dead(reason: p['reason'] as String?),
@@ -100,7 +100,7 @@ class _ValidInvite extends ConsumerWidget {
       const SizedBox(height: 24),
       auth.when(
         loading: () => const CircularProgressIndicator(color: kAccent),
-        error: (_, __) => _AuthGate(token: token),
+        error: (_, _) => _AuthGate(token: token),
         data: (user) => user != null
             ? _AcceptButton(token: token)
             : _AuthGate(token: token),

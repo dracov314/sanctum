@@ -22,9 +22,13 @@ class CampaignWikiPanel extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final wikiAsync = ref.watch(campaignWikiProvider(gameId));
+    final pendingCount = ref.watch(wikiRevisionsProvider(gameId)).valueOrNull?.length ?? 0;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Wrap(spacing: 8, runSpacing: 8, children: [
         TagButton('+ New Page', () => _editWikiPage(context, ref, gameId: gameId, isGm: isGm, pages: wikiAsync.value ?? const [])),
+        if (pendingCount > 0)
+          TagButton('⚑ Review $pendingCount ${pendingCount == 1 ? 'change' : 'changes'}',
+              () => _reviewWikiRevisions(context, ref, gameId: gameId)),
         TagButton('Templates', () => _manageTemplates(context, ref, gameId: gameId)),
         TagButton('Export Wiki (JSON)', () => openExternal('/api/campaigns/$gameId/wiki/export')),
         TagButton('Import Page (.md)', () => pickAndUpload(context,
@@ -256,9 +260,16 @@ class _WikiPageDialogState extends ConsumerState<_WikiPageDialog> {
                 ],
               ]),
               Row(children: [
-                PillButtonOutlined('Edit', () {
-                  Navigator.pop(context);
-                  _editWikiPage(context, ref, gameId: widget.gameId, isGm: widget.isGm, pages: widget.pages, existing: current);
+                PillButtonOutlined('Edit', () async {
+                  // Keep this (view) dialog mounted while the editor is open —
+                  // popping it first disposes our ConsumerState, and the
+                  // editor's Save handler then throws on the dead `ref` after
+                  // the PATCH lands, so the editor never closes ("Save does
+                  // nothing"). Close the view only once a save actually went
+                  // through.
+                  final wasSaved = await _editWikiPage(context, ref,
+                      gameId: widget.gameId, isGm: widget.isGm, pages: widget.pages, existing: current);
+                  if (wasSaved && context.mounted) Navigator.pop(context);
                 }),
                 const SizedBox(width: 8),
                 PillButton('Close', () => Navigator.pop(context)),
@@ -369,9 +380,129 @@ Future<void> _manageTemplates(BuildContext context, WidgetRef ref, {required Str
   );
 }
 
+// -- Edit review (author veto) -----------------------------------------------
+
+Future<void> _reviewWikiRevisions(BuildContext context, WidgetRef ref, {required String gameId}) async {
+  await showDialog(
+    context: context,
+    builder: (ctx) => Consumer(builder: (ctx, ref, _) {
+      final revsAsync = ref.watch(wikiRevisionsProvider(gameId));
+      Future<void> resolve(String id, String action) async {
+        try {
+          await apiPost('/campaigns/$gameId/wiki/revisions/$id/$action');
+        } on ApiException catch (e) {
+          if (ctx.mounted) {
+            ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text(e.message)));
+          }
+        }
+        ref.invalidate(wikiRevisionsProvider(gameId));
+        ref.invalidate(campaignWikiProvider(gameId));
+      }
+      return Dialog(
+        backgroundColor: kCard,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560, maxHeight: 560),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Wiki changes to review', style: serif(15)),
+              const SizedBox(height: 4),
+              const Text('Edits by other people were applied. Keep them, or revert the page.',
+                  style: TextStyle(fontSize: 11, color: kT55)),
+              const SizedBox(height: 12),
+              Flexible(
+                child: revsAsync.when(
+                  loading: () => const Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator()),
+                  error: (e, _) => Text('$e', style: const TextStyle(color: kFail, fontSize: 11)),
+                  data: (revs) {
+                    if (revs.isEmpty) {
+                      return const Text('Nothing to review.', style: TextStyle(fontSize: 12, color: kT55));
+                    }
+                    return SingleChildScrollView(
+                      child: Column(children: [for (final r in revs) _RevisionCard(rev: r, onResolve: resolve)]),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 14),
+              Align(alignment: Alignment.centerRight, child: PillButton('Close', () => Navigator.pop(ctx))),
+            ]),
+          ),
+        ),
+      );
+    }),
+  );
+}
+
+class _RevisionCard extends StatelessWidget {
+  final Map<String, dynamic> rev;
+  final Future<void> Function(String id, String action) onResolve;
+  const _RevisionCard({required this.rev, required this.onResolve});
+
+  @override
+  Widget build(BuildContext context) {
+    final prev = (rev['prev'] as Map?) ?? const {};
+    final next = (rev['new'] as Map?) ?? const {};
+    final editor = rev['editor_name'] as String? ?? 'someone';
+    final title = next['title'] as String? ?? rev['page_title'] as String? ?? 'a page';
+    final titleChanged = prev['title'] != next['title'];
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: kWell, borderRadius: BorderRadius.circular(6)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('$editor edited "$title"', style: const TextStyle(fontSize: 12, color: kT100, fontWeight: FontWeight.w600)),
+        if (titleChanged)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text('Title: "${prev['title']}" → "${next['title']}"',
+                style: const TextStyle(fontSize: 11, color: kT68)),
+          ),
+        if (prev['is_gm_only'] != next['is_gm_only'])
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text('Visibility: ${(next['is_gm_only'] == true) ? 'now GM-only' : 'now visible to players'}',
+                style: const TextStyle(fontSize: 11, color: kWarn)),
+          ),
+        const SizedBox(height: 8),
+        Row(children: [
+          Expanded(child: _diffColumn('Before', prev['content'] as String? ?? '', kT45)),
+          const SizedBox(width: 10),
+          Expanded(child: _diffColumn('After', next['content'] as String? ?? '', kT82)),
+        ]),
+        const SizedBox(height: 10),
+        Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+          PillButton('Revert', () => onResolve(rev['id'] as String, 'revert')),
+          const SizedBox(width: 8),
+          PillButton('Keep', () => onResolve(rev['id'] as String, 'keep')),
+        ]),
+      ]),
+    );
+  }
+
+  Widget _diffColumn(String label, String text, Color color) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 10, color: kT45, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 3),
+          Container(
+            constraints: const BoxConstraints(maxHeight: 140),
+            width: double.infinity,
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(color: kInput, borderRadius: BorderRadius.circular(4)),
+            child: SingleChildScrollView(
+              child: Text(text.isEmpty ? '(empty)' : text, style: TextStyle(fontSize: 11, color: color, height: 1.35)),
+            ),
+          ),
+        ],
+      );
+}
+
 // -- Create/edit dialog ---------------------------------------------------------
 
-Future<void> _editWikiPage(
+/// Returns true if the page was saved (created or updated), false if the
+/// editor was dismissed without saving.
+Future<bool> _editWikiPage(
   BuildContext context,
   WidgetRef ref, {
   required String gameId,
@@ -380,6 +511,7 @@ Future<void> _editWikiPage(
   Map<String, dynamic>? existing,
   String? initialParentId,
 }) async {
+  var saved = false;
   final titleCtrl = TextEditingController(text: existing?['title'] as String? ?? '');
   final contentCtrl = TextEditingController(text: existing?['content'] as String? ?? '');
   bool gmOnly = existing?['is_gm_only'] == true;
@@ -498,11 +630,20 @@ Future<void> _editWikiPage(
                   'is_gm_only': gmOnly,
                   'parent_id': parentId,
                 };
-                if (existing == null) {
-                  await apiPost('/campaigns/$gameId/wiki', body);
-                } else {
-                  await apiPatch('/campaigns/$gameId/wiki/${existing['id']}', body);
+                try {
+                  if (existing == null) {
+                    await apiPost('/campaigns/$gameId/wiki', body);
+                  } else {
+                    await apiPatch('/campaigns/$gameId/wiki/${existing['id']}', body);
+                  }
+                } catch (e) {
+                  if (ctx.mounted) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(
+                        SnackBar(content: Text('Could not save: $e')));
+                  }
+                  return;
                 }
+                saved = true;
                 ref.invalidate(campaignWikiProvider(gameId));
                 if (ctx.mounted) Navigator.pop(ctx);
               }),
@@ -512,4 +653,5 @@ Future<void> _editWikiPage(
       ),
     )),
   );
+  return saved;
 }

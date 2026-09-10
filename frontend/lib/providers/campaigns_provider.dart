@@ -56,6 +56,15 @@ final wikiTemplatesProvider =
   return data.cast<Map<String, dynamic>>();
 });
 
+/// Wiki edits made by someone other than a page's original author, still
+/// awaiting that author's review (keep / revert). GM/owner sees all pending;
+/// a player sees only their own pages'.
+final wikiRevisionsProvider =
+    FutureProvider.family<List<Map<String, dynamic>>, String>((ref, id) async {
+  final data = await apiGet('/campaigns/$id/wiki/revisions?status=pending') as List;
+  return data.cast<Map<String, dynamic>>();
+});
+
 final campaignMembersProvider =
     FutureProvider.family<List<Map<String, dynamic>>, String>((ref, id) async {
   final data = await apiGet('/campaigns/$id/members') as List;
@@ -76,8 +85,8 @@ Future<Map<String, dynamic>> createCampaignInvite(
 }) async {
   final res = await apiPost('/campaigns/$campaignId/invites', {
     'role': role,
-    if (maxUses != null) 'max_uses': maxUses,
-    if (expiresInDays != null) 'expires_in_days': expiresInDays,
+    'max_uses': ?maxUses,
+    'expires_in_days': ?expiresInDays,
   });
   return (res as Map).cast<String, dynamic>();
 }
@@ -110,8 +119,8 @@ Future<Map<String, dynamic>> respondSessionPoll(
 Future<void> updateSessionPoll(String campaignId, String pollId,
     {String? status, String? confirmedOptionId, bool clearConfirmed = false}) async {
   await apiPatch('/campaigns/$campaignId/session-polls/$pollId', {
-    if (status != null) 'status': status,
-    if (confirmedOptionId != null) 'confirmed_option_id': confirmedOptionId,
+    'status': ?status,
+    'confirmed_option_id': ?confirmedOptionId,
     if (clearConfirmed) 'confirmed_option_id': '',
   });
 }

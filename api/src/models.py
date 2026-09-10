@@ -65,8 +65,9 @@ class Session(Base):
     # Authentik's end-session endpoint (required for post_logout_redirect_uri
     # to be honored, see auth.py).
     id_token = Column(Text, nullable=True)
-    # Bumped (throttled) on every authenticated request — lets /auth/agent
-    # gate agent-login access on "has dracov been active recently".
+    # Bumped (throttled) on every authenticated request — lets
+    # /auth/automation gate the service-account login on "has the anchor
+    # account been active recently".
     last_seen = Column(DateTime(timezone=True), nullable=True)
 
 
@@ -428,6 +429,39 @@ class WikiPage(Base):
     author = relationship("User")
 
     __table_args__ = (Index("ix_wiki_pages_campaign", "campaign_id"),)
+
+
+class WikiRevision(Base):
+    """One edit to a wiki page made by someone *other* than the page's original
+    author. The edit is applied immediately (the wiki stays collaborative), but
+    a pending revision is raised so the original author can review the
+    before/after and either KEEP it or REVERT the page to the pre-edit snapshot.
+    """
+    __tablename__ = "wiki_revisions"
+    id = Column(Text, primary_key=True, default=new_uuid)
+    page_id = Column(Text, ForeignKey("wiki_pages.id", ondelete="CASCADE"), nullable=False)
+    campaign_id = Column(Text, ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False)
+    editor_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Who gets to review: the page's original author, or the campaign owner if
+    # that author is gone / the page had none.
+    reviewer_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    prev_title = Column(Text)
+    prev_content = Column(Text)
+    prev_is_gm_only = Column(Boolean)
+    new_title = Column(Text)
+    new_content = Column(Text)
+    new_is_gm_only = Column(Boolean)
+    status = Column(Text, nullable=False, default="pending")  # pending | kept | reverted
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    resolved_at = Column(DateTime(timezone=True))
+
+    editor = relationship("User", foreign_keys=[editor_id])
+    reviewer = relationship("User", foreign_keys=[reviewer_id])
+
+    __table_args__ = (
+        Index("ix_wiki_revisions_reviewer", "reviewer_id", "status"),
+        Index("ix_wiki_revisions_campaign", "campaign_id", "status"),
+    )
 
 
 class WikiTemplate(Base):

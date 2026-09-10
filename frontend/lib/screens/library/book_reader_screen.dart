@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../providers/auth_provider.dart';
 import '../../providers/library_provider.dart';
 import '../../ui/chrome.dart';
 import 'reader/toc_drawer.dart';
@@ -271,10 +272,19 @@ class _BookReaderScreenState extends ConsumerState<BookReaderScreen> {
             WidgetsBinding.instance.addPostFrameCallback((_) => _preloadAdjacent());
           }
           final isPdf = book['mime_type'] == 'application/pdf';
+          // Raw-file access (the native-PDF "pdf" mode + the Download button).
+          // Admin-only unless the instance opts into open downloads
+          // (LIBRARY_DOWNLOAD_POLICY=all). Everyone else reads via the
+          // server-rendered page images.
+          final auth = ref.watch(authProvider).value;
+          final canRawFile = (auth?.isAdmin ?? false) || (auth?.libraryDownloadsOpen ?? false);
           // Non-PDF library items (e.g. a bare image) have no page-image
           // endpoint to render from — always fall back to the raw-file view
           // for those, regardless of a stale page/spread mode saved in prefs.
-          final effectiveMode = isPdf ? _mode : _ReaderMode.pdf;
+          var effectiveMode = isPdf ? _mode : _ReaderMode.pdf;
+          if (!canRawFile && effectiveMode == _ReaderMode.pdf && isPdf) {
+            effectiveMode = _ReaderMode.page;
+          }
 
           return Focus(
             focusNode: _keyFocus,
@@ -284,6 +294,7 @@ class _BookReaderScreenState extends ConsumerState<BookReaderScreen> {
               _Toolbar(
                 book: book,
                 isPdf: isPdf,
+                canRawFile: canRawFile,
                 mode: effectiveMode,
                 onModeChange: _setMode,
                 spreadOffset: _spreadOffset,
@@ -380,6 +391,7 @@ class _BookReaderScreenState extends ConsumerState<BookReaderScreen> {
 class _Toolbar extends StatelessWidget {
   final Map<String, dynamic> book;
   final bool isPdf;
+  final bool canRawFile;
   final _ReaderMode mode;
   final ValueChanged<_ReaderMode> onModeChange;
   final int spreadOffset;
@@ -410,6 +422,7 @@ class _Toolbar extends StatelessWidget {
   const _Toolbar({
     required this.book,
     required this.isPdf,
+    required this.canRawFile,
     required this.mode,
     required this.onModeChange,
     required this.spreadOffset,
@@ -493,7 +506,7 @@ class _Toolbar extends StatelessWidget {
               ],
 
               if (isPdf) ...[
-                _ModeToggle(mode: mode, onModeChange: onModeChange),
+                _ModeToggle(mode: mode, onModeChange: onModeChange, allowPdf: canRawFile),
                 const SizedBox(width: 10),
               ],
 
@@ -541,11 +554,12 @@ class _Toolbar extends StatelessWidget {
             child: SizedBox(width: 16, height: 16,
                 child: CircularProgressIndicator(strokeWidth: 2, color: kWarn)),
           ),
-        _IconBtn(
-          icon: Icons.download,
-          tooltip: 'Download',
-          onTap: () => html.window.open('/api/library/books/$bookId/file', '_blank'),
-        ),
+        if (canRawFile)
+          _IconBtn(
+            icon: Icons.download,
+            tooltip: 'Download',
+            onTap: () => html.window.open('/api/library/books/$bookId/file', '_blank'),
+          ),
       ]),
     );
   }
@@ -554,7 +568,9 @@ class _Toolbar extends StatelessWidget {
 class _ModeToggle extends StatelessWidget {
   final _ReaderMode mode;
   final ValueChanged<_ReaderMode> onModeChange;
-  const _ModeToggle({required this.mode, required this.onModeChange});
+  // The raw-file "PDF" mode is admin-only (anti-piracy); hidden otherwise.
+  final bool allowPdf;
+  const _ModeToggle({required this.mode, required this.onModeChange, this.allowPdf = false});
 
   static const _entries = [
     (_ReaderMode.page, Icons.description, 'Page'),
@@ -564,11 +580,12 @@ class _ModeToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final entries = _entries.where((e) => allowPdf || e.$1 != _ReaderMode.pdf);
     return Container(
       decoration: BoxDecoration(border: Border.all(color: kBorderDim), borderRadius: BorderRadius.circular(6)),
       clipBehavior: Clip.antiAlias,
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        for (final (m, icon, label) in _entries)
+        for (final (m, icon, label) in entries)
           InkWell(
             onTap: () => onModeChange(m),
             child: Container(
@@ -933,7 +950,7 @@ class _SearchResults extends ConsumerWidget {
         return ListView.separated(
           shrinkWrap: true,
           itemCount: results.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 4),
+          separatorBuilder: (_, _) => const SizedBox(height: 4),
           itemBuilder: (_, i) {
             final r = results[i];
             final page = r['page_number'] as int;

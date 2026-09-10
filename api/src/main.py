@@ -22,6 +22,13 @@ try:
 except ImportError:
     _HAS_FUZION = False
 
+# Lorekeeper's /build_character endpoints — private (.public-exclude), 2.0 track.
+try:
+    from .routers.bot_character import router as bot_character_router
+    _HAS_BOT_CHARACTER = True
+except ImportError:
+    _HAS_BOT_CHARACTER = False
+
 # Idempotent: add new columns to tables that already exist in production.
 # create_all handles brand-new tables; these handle column additions on existing ones.
 _ALTER_STMTS = [
@@ -151,3 +158,5 @@ app.include_router(assets_router, prefix="/api")
 app.include_router(favorites_router, prefix="/api")
 if _HAS_FUZION:
     app.include_router(fuzion_router, prefix="/api")
+if _HAS_BOT_CHARACTER:
+    app.include_router(bot_character_router, prefix="/api")

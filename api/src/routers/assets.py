@@ -101,12 +101,11 @@ async def list_map_tags(db: AsyncSession = Depends(get_db), _: User = Depends(ge
     return sorted({r[0] for r in rows}, key=str.lower)
 
 
-@router.patch("/maps/{map_id}/tags")
+@router.patch("/maps/{map_id}/tags", dependencies=[Depends(require_admin)])
 async def update_map_tags(
     map_id: str,
     body: TagsUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
 ):
     m = await db.get(Map, map_id)
     if not m:
@@ -211,12 +210,11 @@ async def list_token_tags(db: AsyncSession = Depends(get_db), _: User = Depends(
     return sorted({r[0] for r in rows}, key=str.lower)
 
 
-@router.patch("/tokens/{token_id}/tags")
+@router.patch("/tokens/{token_id}/tags", dependencies=[Depends(require_admin)])
 async def update_token_tags(
     token_id: str,
     body: TagsUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
 ):
     t = await db.get(Token, token_id)
     if not t:

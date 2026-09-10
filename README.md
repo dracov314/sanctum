@@ -21,24 +21,26 @@ Released under **AGPL-3.0**.
 
 ## Status
 
-**v0.1.0 — early, and under active development.** The core (library, PDF
-reader + search, campaigns, wiki, maps, tokens, the session room, auth) works
-today. This is an open-core release of a project whose private trunk drives a
-live game group, so development is ongoing and the public build tracks it.
+**v1.0.0.** The core is complete and stable: a game-system library with a real
+PDF reader (text index, search, OCR), per-campaign wikis, maps and tokens, a
+system-agnostic live session room, account management, and guest / invite
+access. It runs a live game group off a private trunk, and the public build
+tracks that trunk.
 
-Where it's headed:
+On the roadmap:
 
 - **Game-system plugin API** — Sanctum already routes game-system modules
-  through a small seam (`frontend/lib/game_systems_api.dart`); the next step is
-  making that API rich enough that a system (character sheets, dice/combat
-  rules, advancement) can be dropped in as a module. The maintainer's own
-  system stays private; the seam is public.
-- **Account management** — admin user list, invites, self-service profile.
-- **Guest / invite access** — GM-generated links to join a campaign or spectate
-  without an admin creating the account.
-- **Library** — metadata editing, bulk ingestion, per-system organisation.
+  through a small seam (`frontend/lib/game_systems_api.dart`); the goal is to
+  make it rich enough that a full system (character sheets, dice/combat rules,
+  advancement) drops in as a module. The maintainer's own system stays private;
+  the seam is public.
+- **Library** — richer metadata editing, bulk ingestion, deeper per-system
+  organisation.
+- **Reader** — text-selection bookmarks, `dart:html` → `package:web` migration.
+- **Service-account `dev` tier** — the automation login gains an opt-in
+  `/dev/*` diagnostics namespace in a later release.
 
-Issues and PRs are welcome. Expect rough edges on the newer screens.
+Issues and PRs welcome.
 
 ## What's included
 
@@ -52,7 +54,8 @@ Issues and PRs are welcome. Expect rough edges on the newer screens.
   chat, an `NdM+K` dice roller with quick-roll buttons and private rolls, and
   GM session start/end. A game system can register its own focused room.
 - **Accounts** — local username/password, any external OpenID Connect
-  provider (auto-discovered, no specific IdP required), or both.
+  provider (auto-discovered, no specific IdP required), or both. Optional
+  service/automation account for CI, monitoring, or an assistant.
 - **Discord bot** (optional) — session-room roll relay and session logging.
 
 ## What's *not* included

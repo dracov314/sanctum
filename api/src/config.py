@@ -1,12 +1,16 @@
+import logging
+
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
+
+log = logging.getLogger("sanctum.config")
 
 
 class Settings(BaseSettings):
     postgres_password: str
     discord_bot_token: str = ""   # Lorekeeper bot only
     secret_key: str
-    base_url: str            # https://sanctum.untrustedhub.wtf
+    base_url: str            # https://sanctum.example.com
 
     # Authentication mode: "local" (username/password only — public open-core
     # default), "oidc" (any OpenID Connect provider), or "both". The OIDC routes
@@ -48,13 +52,42 @@ class Settings(BaseSettings):
     # Authentik "user_write" webhook (optional, Authentik-specific) — forces a
     # Sanctum re-login after a rename/password change at the IdP.
     authentik_base_url: str = ""  # https://id.example.com
+    # Per-file upload ceilings (MiB). Campaign files / banners / character
+    # sheets / wiki-markdown share the first; admin book-PDF uploads the second.
+    max_upload_mb: int = 25
+    max_book_upload_mb: int = 300
+    # Who can pull a raw library PDF / a whole-system ZIP:
+    #   "admin"  — admins only (default; reading still open to everyone via the
+    #              server-rendered page images)
+    #   "all"    — any signed-in user (a trusted private instance)
+    library_download_policy: str = "admin"
     library_path: str = "/library"
     thumbnails_path: str = "/thumbnails"  # legacy pre-migration thumbnails, read-only fallback
     book_thumbnails_path: str = "/data/book_thumbnails"  # Sanctum's own generated thumbnails
     page_cache_path: str = "/data/page_cache"  # rendered reader page images (webp)
     campaign_files_path: str = "/data/campaign_files"
     bot_api_key: str = ""
-    agent_secret_key: str = ""  # gates GET /auth/agent/{secret}, see auth.py
+
+    # ── Service / automation account (optional) ──────────────────────────────
+    # A machine login for CI, monitoring, or an assistant working on the
+    # instance. Everything here is off unless both secrets below are set.
+    # See docs — GET /auth/automation/{secret}.
+    automation_secret_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("automation_secret_key", "agent_secret_key"),
+    )
+    # The login window is tied to this anchor account having a live session in
+    # the last few hours (a human at the keyboard). Unset ⇒ off even with a
+    # secret set. Set to your own username.
+    automation_activity_username: str = Field(
+        default="",
+        validation_alias=AliasChoices("automation_activity_username", "agent_activity_username"),
+    )
+    # Access level for the service account: "user" (default, non-admin),
+    # "admin" (instance admin). "dev" (admin + a diagnostics namespace) is
+    # reserved for a later release — set now, it warns and falls back to "user".
+    automation_account_role: str = "user"
+
     authentik_webhook_secret: str = ""  # gates POST /auth/authentik-webhook/{secret}
     authentik_admin_token: str = ""     # read-only (view_user only) service-account token, for the webhook's user lookup
 
@@ -90,6 +123,24 @@ class Settings(BaseSettings):
     @property
     def oidc_admin_email_set(self) -> set[str]:
         return {e.strip().lower() for e in self.oidc_admin_emails.split(",") if e.strip()}
+
+    @property
+    def automation_account_is_admin(self) -> bool:
+        """Resolve automation_account_role to an is_admin flag for the account.
+        'dev' is not available yet — warn and treat as the least-privileged
+        'user' rather than silently granting admin."""
+        role = (self.automation_account_role or "user").strip().lower()
+        if role == "admin":
+            return True
+        if role == "dev":
+            log.warning(
+                "AUTOMATION_ACCOUNT_ROLE='dev' is not available yet "
+                "(the diagnostics tooling ships in a later release); the "
+                "service account is running as 'user'. Set 'admin' if you "
+                "need elevated access now."
+            )
+            return False
+        return False
 
     class Config:
         env_file = ".env"

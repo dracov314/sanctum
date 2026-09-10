@@ -157,7 +157,7 @@ class _TokensScreenState extends ConsumerState<TokensScreen> {
                   : _FolderRail(folders: folders, selected: _selectedFolder,
                       onSelect: (f) => setState(() => _selectedFolder = f)),
               loading: () => const SizedBox.shrink(),
-              error: (_, __) => const SizedBox.shrink(),
+              error: (_, _) => const SizedBox.shrink(),
             ),
             Expanded(
               child: tokensAsync.when(
@@ -265,7 +265,7 @@ class _TokenTile extends StatelessWidget {
                   padding: const EdgeInsets.all(8),
                   child: ClipOval(
                     child: Image.network('/api/assets/tokens/${token['id']}/file', fit: BoxFit.contain,
-                        errorBuilder: (_, __, ___) => const Center(child: Text('🧍', style: TextStyle(fontSize: 28, color: kT40)))),
+                        errorBuilder: (_, _, _) => const Center(child: Text('🧍', style: TextStyle(fontSize: 28, color: kT40)))),
                   ),
                 ),
                 Positioned(

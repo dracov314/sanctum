@@ -21,8 +21,8 @@ class AdminUsersNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
   Future<String?> patch(int id, {bool? isAdmin, bool? isDisabled}) async {
     try {
       await apiPatch('/auth/users/$id', {
-        if (isAdmin != null) 'is_admin': isAdmin,
-        if (isDisabled != null) 'is_disabled': isDisabled,
+        'is_admin': ?isAdmin,
+        'is_disabled': ?isDisabled,
       });
     } on ApiException catch (e) {
       return _detail(e.message);
@@ -97,6 +97,7 @@ class _UserRow extends ConsumerWidget {
     final id = user['id'] as int;
     final disabled = user['is_disabled'] == true;
     final isAdmin = user['is_admin'] == true;
+    final isAutomation = user['auth_kind'] == 'automation';
     final owned = (user['campaigns_owned'] ?? 0) as int;
     final joined = user['campaigns_joined'] ?? 0;
     final name = (user['display_name'] as String?)?.isNotEmpty == true
@@ -124,7 +125,8 @@ class _UserRow extends ConsumerWidget {
                         color: disabled ? kT45 : kT100)),
               ),
               const SizedBox(width: 8),
-              if (isAdmin) _tag('admin', gold: true),
+              if (isAutomation) _tag('automation', accent: true),
+              if (isAdmin) ...[const SizedBox(width: 6), _tag('admin', gold: true)],
               if (disabled) ...[const SizedBox(width: 6), _tag('disabled', fail: true)],
               if (isSelf) ...[const SizedBox(width: 6), _tag('you', accent: true)],
             ]),
@@ -136,6 +138,14 @@ class _UserRow extends ConsumerWidget {
               '  ·  $owned owned / $joined joined',
               style: const TextStyle(fontSize: 11, color: kT55),
             ),
+            if (isAutomation) ...[
+              const SizedBox(height: 3),
+              Text(
+                'Access: ${isAdmin ? 'admin' : 'user'}  ·  dev (coming soon)  '
+                '— set AUTOMATION_ACCOUNT_ROLE in .env',
+                style: const TextStyle(fontSize: 10, color: kT45),
+              ),
+            ],
           ]),
         ),
         const SizedBox(width: 8),
@@ -156,7 +166,9 @@ class _UserRow extends ConsumerWidget {
                   await _act(context, ref, n.patch(id, isDisabled: !disabled));
                 case 'delete':
                   final ok = await _confirmDelete(context, name, owned);
-                  if (ok == true) await _act(context, ref, n.remove(id));
+                  if (ok == true && context.mounted) {
+                    await _act(context, ref, n.remove(id));
+                  }
               }
             },
             itemBuilder: (_) => [
@@ -170,6 +182,13 @@ class _UserRow extends ConsumerWidget {
                 child: Text(disabled ? 'Re-enable account' : 'Disable account',
                     style: const TextStyle(fontSize: 12, color: kT100)),
               ),
+              if (isAutomation)
+                const PopupMenuItem(
+                  value: 'dev',
+                  enabled: false,
+                  child: Text('Dev access — coming soon',
+                      style: TextStyle(fontSize: 12, color: kT45)),
+                ),
               const PopupMenuDivider(),
               PopupMenuItem(
                 value: 'delete',

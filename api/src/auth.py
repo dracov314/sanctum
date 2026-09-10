@@ -80,8 +80,8 @@ async def get_current_user(
         raise HTTPException(status_code=403, detail="This account has been disabled")
 
     # Throttled activity touch — only write if stale, so this doesn't turn
-    # into a DB write on every single request. Feeds /auth/agent's "has
-    # dracov been active recently" check.
+    # into a DB write on every single request. Feeds /auth/automation's
+    # "has the anchor account been active recently" check.
     now = datetime.now(timezone.utc)
     if session.last_seen is None or (now - session.last_seen) > timedelta(minutes=5):
         session.last_seen = now
@@ -104,7 +104,7 @@ async def _mint_session(
     id_token: str | None = None,
 ) -> str:
     """Create a Session row and set the session_id cookie — the single path
-    every login (Authentik, local password, agent) funnels through."""
+    every login (Authentik, local password, automation) funnels through."""
     session_id = secrets.token_urlsafe(32)
     db.add(Session(
         id=session_id,
@@ -348,6 +348,7 @@ async def me(user: User = Depends(get_current_user)):
         # change-password form only when this is true and local auth is on.
         "has_password": bool(user.password_hash),
         "local_auth": settings.local_enabled,
+        "library_downloads_open": settings.library_download_policy == "all",
     }
 
 
@@ -378,6 +379,7 @@ async def update_me(
         "is_admin": user.is_admin,
         "has_password": bool(user.password_hash),
         "local_auth": settings.local_enabled,
+        "library_downloads_open": settings.library_download_policy == "all",
     }
 
 
@@ -428,8 +430,8 @@ async def put_preference(
 def _auth_kind(uid: str) -> str:
     if uid.startswith(LOCAL_UID_PREFIX):
         return "local"
-    if uid.startswith("agent:"):
-        return "agent"
+    if uid.startswith("agent:"):  # stored id of the service/automation account
+        return "automation"
     return "sso"
 
 
@@ -540,8 +542,8 @@ async def search_users(
     rows = (await db.execute(
         select(User).where(
             (User.username.ilike(pattern) | User.display_name.ilike(pattern))
-            # Agent accounts (see /auth/agent) aren't real players — keep
-            # them out of the "add a player to this game" picker.
+            # The service/automation account isn't a real player — keep it
+            # out of the "add a player to this game" picker.
             & ~User.authentik_uid.ilike("agent:%")
         ).limit(10)
     )).scalars().all()
@@ -600,41 +602,53 @@ async def logout(
     return {"ok": True, "idp_logout_url": idp_logout_url}
 
 
-# ── Agent login (bypasses Authentik entirely) ───────────────────────────────
+# ── Service / automation account login (bypasses OIDC) ──────────────────────
 #
-# Lets an automation / QA agent authenticate without going through the full
-# OAuth dance for every testing pass. Gated two ways:
-# (1) a long random secret in the URL (AGENT_SECRET_KEY, unset = disabled),
-# (2) only works while the real "dracov" account has been active in the last
-# 3 hours (via Session.last_seen, see get_current_user above) — so the
-# window this is usable in is tied to an actual human being at the keyboard,
-# not permanently open. Both failure modes return an identical generic 404
-# so a request with a wrong/guessed secret can't distinguish "wrong secret"
-# from "right secret but dracov isn't active right now".
+# A machine login for CI, monitoring, or an assistant working on the instance.
+# Off unless configured. Gated three ways:
+# (1) a long random secret in the URL (AUTOMATION_SECRET_KEY, unset = disabled),
+# (2) an anchor account (AUTOMATION_ACTIVITY_USERNAME, unset = disabled),
+# (3) only works while that anchor account has had a live session in the last
+# 3 hours (via Session.last_seen, see get_current_user above) — so the window
+# this is usable in is tied to an actual human being at the keyboard, not
+# permanently open. Both failure modes return an identical generic 404 so a
+# request with a wrong/guessed secret can't distinguish "wrong secret" from
+# "right secret but the anchor account isn't active right now".
+#
+# The account's access level follows AUTOMATION_ACCOUNT_ROLE ("user" | "admin";
+# "dev" is reserved for a later release). It shows up in Admin → Users like any
+# account. The stored authentik_uid ("agent:automation") is kept for continuity
+# with instances that ran the earlier build.
 
-_AGENT_USERNAME = "agent"
-_AGENT_AUTHENTIK_UID = "agent:automation"
-_AGENT_SESSION_TTL_HOURS = 6
-_AGENT_ACTIVITY_WINDOW_HOURS = 3
+_AUTOMATION_USERNAME = "automation"
+_AUTOMATION_AUTHENTIK_UID = "agent:automation"  # stable id — do not change
+_AUTOMATION_SESSION_TTL_HOURS = 6
+_AUTOMATION_ACTIVITY_WINDOW_HOURS = 3
 
 
-@router.get("/agent/{secret}")
-async def agent_login(secret: str, db: AsyncSession = Depends(get_db)):
+@router.get("/automation/{secret}")
+async def automation_login(secret: str, db: AsyncSession = Depends(get_db)):
     not_found = HTTPException(status_code=404)
 
-    if not settings.agent_secret_key or not secrets.compare_digest(secret, settings.agent_secret_key):
+    if not settings.automation_secret_key or not secrets.compare_digest(
+        secret, settings.automation_secret_key
+    ):
+        raise not_found
+    if not settings.automation_activity_username:
         raise not_found
 
-    dracov = (await db.execute(
-        select(User).where(User.username.ilike("dracov"))
+    anchor = (await db.execute(
+        select(User).where(
+            func.lower(User.username) == settings.automation_activity_username.lower()
+        )
     )).scalar_one_or_none()
-    if not dracov:
+    if not anchor:
         raise not_found
 
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=_AGENT_ACTIVITY_WINDOW_HOURS)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=_AUTOMATION_ACTIVITY_WINDOW_HOURS)
     recent_session = (await db.execute(
         select(Session).where(
-            Session.user_id == dracov.id,
+            Session.user_id == anchor.id,
             Session.last_seen.is_not(None),
             Session.last_seen > cutoff,
         ).limit(1)
@@ -642,24 +656,32 @@ async def agent_login(secret: str, db: AsyncSession = Depends(get_db)):
     if not recent_session:
         raise not_found
 
-    agent_user = (await db.execute(
-        select(User).where(User.authentik_uid == _AGENT_AUTHENTIK_UID)
+    want_admin = settings.automation_account_is_admin
+    svc_user = (await db.execute(
+        select(User).where(User.authentik_uid == _AUTOMATION_AUTHENTIK_UID)
     )).scalar_one_or_none()
-    if not agent_user:
-        agent_user = User(
-            authentik_uid=_AGENT_AUTHENTIK_UID,
-            username=_AGENT_USERNAME,
+    if not svc_user:
+        svc_user = User(
+            authentik_uid=_AUTOMATION_AUTHENTIK_UID,
+            username=_AUTOMATION_USERNAME,
             display_name="Automation",
-            is_admin=True,
+            is_admin=want_admin,
         )
-        db.add(agent_user)
+        db.add(svc_user)
         await db.flush()
+    else:
+        # env is the source of truth for the service account
+        svc_user.is_admin = want_admin
+        svc_user.username = _AUTOMATION_USERNAME
+        if not svc_user.display_name:
+            svc_user.display_name = "Automation"
 
     session_id = secrets.token_urlsafe(32)
     session = Session(
         id=session_id,
-        user_id=agent_user.id,
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=_AGENT_SESSION_TTL_HOURS),
+        user_id=svc_user.id,
+        expires_at=datetime.now(timezone.utc)
+        + timedelta(hours=_AUTOMATION_SESSION_TTL_HOURS),
     )
     db.add(session)
     await db.commit()
@@ -674,7 +696,7 @@ async def agent_login(secret: str, db: AsyncSession = Depends(get_db)):
         session_id,
         httponly=True,
         samesite="lax",
-        max_age=_AGENT_SESSION_TTL_HOURS * 3600,
+        max_age=_AUTOMATION_SESSION_TTL_HOURS * 3600,
     )
     return redirect
 
@@ -693,7 +715,7 @@ async def agent_login(secret: str, db: AsyncSession = Depends(get_db)):
 #      directly against Authentik's DB, not just assumed from docs),
 #   3. delete every active Sanctum session for that user, forcing a real
 #      re-login (and thus a fresh sync) the next time they touch the app.
-# Gated by a long random secret in the URL, same pattern as /auth/agent.
+# Gated by a long random secret in the URL, same pattern as /auth/automation.
 
 @router.post("/authentik-webhook/{secret}")
 async def authentik_webhook(

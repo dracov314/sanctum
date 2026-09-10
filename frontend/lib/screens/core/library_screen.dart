@@ -365,7 +365,7 @@ class _SystemCard extends StatelessWidget {
     return InkWell(
       // Every system card leads to the Library's own per-system book
       // browsing page — no exceptions. Fuzion's game-management tooling
-      // (Games/Characters/Sessions) is reached via the "My Games"/"My
+      // (Games/Characters/Sessions) is reached via the "Campaigns" / "My
       // Characters" sidebar destinations instead, same as every other
       // cross-system aggregate on this site — clicking through the Library
       // should never be a shortcut into that.
@@ -530,24 +530,11 @@ class _SystemListRow extends StatelessWidget {
 
 // ── Per-system landing page (real book browsing, no mockup equivalent) ─────
 
-const _categoryOrder = [
-  'core', 'supplement', 'adventure', 'character-sheet', 'setting', 'reference',
-  'homebrew', 'unofficial', 'the-rifter', 'world-books', 'dimension-books', 'coalition-war', 'cenotaphium',
-];
-
-String _categoryLabel(String? cat) => switch (cat) {
-      'core' => 'Core Rulebooks', 'supplement' => 'Supplements', 'adventure' => 'Adventures',
-      'character-sheet' => 'Character Sheets', 'setting' => 'Setting Books', 'reference' => 'Reference',
-      'homebrew' => 'Homebrew', 'unofficial' => 'Unofficial', 'the-rifter' => 'The Rifter',
-      'world-books' => 'World Books', 'dimension-books' => 'Dimension Books',
-      'coalition-war' => 'Coalition Wars', 'cenotaphium' => 'Cenotaphium',
-      _ => cat ?? 'Uncategorized',
-    };
-
-int _categoryRank(String? cat) {
-  final i = _categoryOrder.indexOf(cat ?? '');
-  return i < 0 ? 99 : i;
-}
+// Book category taxonomy (order / labels / grouping) now lives in
+// providers/library_provider.dart — shared with the session room's Fuzion
+// Resources panel. Local aliases keep this file's call sites unchanged.
+String _categoryLabel(String? cat) => bookCategoryLabel(cat);
+int _categoryRank(String? cat) => bookCategoryRank(cat);
 
 class SystemLandingScreen extends ConsumerStatefulWidget {
   final String systemId;
@@ -617,7 +604,10 @@ class _SystemLandingScreenState extends ConsumerState<SystemLandingScreen> {
                   const SizedBox(height: 2),
                   Text('$count ${count == 1 ? 'book' : 'books'} in library', style: const TextStyle(fontSize: 11, color: kT68)),
                 ])),
-                Padding(padding: const EdgeInsets.only(bottom: 10), child: TagButton('⬇ Download ZIP', () => _downloadZip(widget.systemId))),
+                // Bulk ZIP export is admin-only unless the instance opts into
+                // open downloads; non-admins read books in-app via the reader.
+                if (isAdmin || (ref.watch(authProvider).value?.libraryDownloadsOpen ?? false))
+                  Padding(padding: const EdgeInsets.only(bottom: 10), child: TagButton('⬇ Download ZIP', () => _downloadZip(widget.systemId))),
               ]),
             ),
             if (gameSystemModules.isNotEmpty)
@@ -693,7 +683,7 @@ class _SystemLandingScreenState extends ConsumerState<SystemLandingScreen> {
   }
 
   void _downloadZip(String systemId) {
-    html.AnchorElement(href: '/api/library/systems/$systemId/download')..click();
+    html.AnchorElement(href: '/api/library/systems/$systemId/download').click();
   }
 
   Future<void> _editSystem(BuildContext context, WidgetRef ref, Map<String, dynamic> system) async {
@@ -880,7 +870,7 @@ class _BookCoverTile extends ConsumerWidget {
                 aspectRatio: 3 / 4,
                 child: book['has_thumbnail'] == true
                     ? Image.network('/api/library/books/$id/thumbnail', fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const ColoredBox(color: kInput, child: Icon(Icons.menu_book, size: 20, color: kT45)))
+                        errorBuilder: (_, _, _) => const ColoredBox(color: kInput, child: Icon(Icons.menu_book, size: 20, color: kT45)))
                     : const ColoredBox(color: kInput, child: Icon(Icons.menu_book, size: 20, color: kT45)),
               ),
             ),
@@ -928,7 +918,7 @@ class _BookRow extends ConsumerWidget {
               width: 32, height: 44,
               child: book['has_thumbnail'] == true
                   ? Image.network('/api/library/books/${book['id']}/thumbnail', fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const ColoredBox(color: kInput, child: Icon(Icons.menu_book, size: 14, color: kT45)))
+                      errorBuilder: (_, _, _) => const ColoredBox(color: kInput, child: Icon(Icons.menu_book, size: 14, color: kT45)))
                   : const ColoredBox(color: kInput, child: Icon(Icons.menu_book, size: 14, color: kT45)),
             ),
           ),

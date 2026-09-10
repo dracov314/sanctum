@@ -30,7 +30,7 @@ import 'screens/assets/tokens_screen.dart';
 // the listenable fires, without touching the router instance itself.
 class _AuthRefreshListenable extends ChangeNotifier {
   _AuthRefreshListenable(Ref ref) {
-    ref.listen(authProvider, (_, __) => notifyListeners());
+    ref.listen(authProvider, (_, _) => notifyListeners());
   }
 }
 
@@ -61,7 +61,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       // authProvider's build() is async, so on a cold load its value is
       // transiently null while the /auth/me check is in flight — identical
       // to "logged out". Redirecting to /login during that window discards
-      // whatever deep link was actually requested (e.g. #/my-games), because
+      // whatever deep link was actually requested (e.g. #/campaigns), because
       // by the time auth resolves a moment later, matchedLocation is already
       // '/login' and the isLoginPage branch below sends everyone to
       // '/dashboard' instead. Waiting for the load to finish (refreshListenable
@@ -82,7 +82,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: [
-      GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
+      GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
       GoRoute(
         path: '/join/:token',
         builder: (_, state) => JoinInviteScreen(token: state.pathParameters['token']!),
@@ -95,12 +95,12 @@ final routerProvider = Provider<GoRouter>((ref) {
           // routes below.
           GoRoute(
             path: '/dashboard',
-            pageBuilder: (_, __) => _noAnim(_dashboardHome()),
+            pageBuilder: (_, _) => _noAnim(_dashboardHome()),
           ),
           // Library is the real system grid + real per-system book browsing.
           GoRoute(
             path: '/library',
-            pageBuilder: (_, __) => _noAnim(const LibraryScreen()),
+            pageBuilder: (_, _) => _noAnim(const LibraryScreen()),
             routes: [
               GoRoute(
                 path: 'system/:systemId',
@@ -119,7 +119,7 @@ final routerProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/campaigns',
-            pageBuilder: (_, __) => _noAnim(const CampaignsScreen()),
+            pageBuilder: (_, _) => _noAnim(const CampaignsScreen()),
             routes: [
               GoRoute(
                 path: ':id',
@@ -144,23 +144,23 @@ final routerProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/maps',
-            pageBuilder: (_, __) => _noAnim(const MapsScreen(standalone: true)),
+            pageBuilder: (_, _) => _noAnim(const MapsScreen(standalone: true)),
           ),
           GoRoute(
             path: '/tokens',
-            pageBuilder: (_, __) => _noAnim(const TokensScreen(standalone: true)),
+            pageBuilder: (_, _) => _noAnim(const TokensScreen(standalone: true)),
           ),
           GoRoute(
             path: '/account',
-            pageBuilder: (_, __) => _noAnim(const AccountScreen()),
+            pageBuilder: (_, _) => _noAnim(const AccountScreen()),
           ),
           GoRoute(
             path: '/admin/users',
-            pageBuilder: (_, __) => _noAnim(const AdminUsersScreen()),
+            pageBuilder: (_, _) => _noAnim(const AdminUsersScreen()),
           ),
           GoRoute(
             path: '/admin/tags',
-            pageBuilder: (_, __) => _noAnim(const AdminTagsScreen()),
+            pageBuilder: (_, _) => _noAnim(const AdminTagsScreen()),
           ),
           // Game-system module routes (Fuzion in the private build; none in
           // the public open-core build).

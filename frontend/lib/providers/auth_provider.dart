@@ -28,6 +28,9 @@ class AuthUser {
   final bool isAdmin;
   final bool hasPassword;
   final bool localAuth;
+  // Instance policy: raw library PDF / whole-system ZIP downloads open to every
+  // signed-in user (vs admin-only). Reading in-app is unaffected either way.
+  final bool libraryDownloadsOpen;
 
   const AuthUser({
     required this.id,
@@ -37,6 +40,7 @@ class AuthUser {
     required this.isAdmin,
     this.hasPassword = false,
     this.localAuth = false,
+    this.libraryDownloadsOpen = false,
   });
 
   factory AuthUser.fromJson(Map<String, dynamic> j) => AuthUser(
@@ -47,6 +51,7 @@ class AuthUser {
         isAdmin: j['is_admin'] ?? false,
         hasPassword: j['has_password'] ?? false,
         localAuth: j['local_auth'] ?? false,
+        libraryDownloadsOpen: j['library_downloads_open'] ?? false,
       );
 
   String get initials {
@@ -88,7 +93,7 @@ class AuthNotifier extends AsyncNotifier<AuthUser?> {
         'username': username,
         if (email.isNotEmpty) 'email': email,
         'password': password,
-        if (inviteToken != null) 'invite_token': inviteToken,
+        'invite_token': ?inviteToken,
       });
 
   Future<String?> _localAuth(String path, Map<String, dynamic> body) async {
@@ -107,8 +112,8 @@ class AuthNotifier extends AsyncNotifier<AuthUser?> {
   Future<String?> updateProfile({String? displayName, String? email}) async {
     try {
       await apiPatch('/auth/me', {
-        if (displayName != null) 'display_name': displayName,
-        if (email != null) 'email': email,
+        'display_name': ?displayName,
+        'email': ?email,
       });
     } on ApiException catch (e) {
       return _detail(e.message);

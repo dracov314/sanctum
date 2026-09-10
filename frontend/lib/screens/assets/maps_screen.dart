@@ -160,7 +160,7 @@ class _MapsScreenState extends ConsumerState<MapsScreen> {
                   : _FolderRail(folders: folders, selected: _selectedFolder,
                       onSelect: (f) => setState(() => _selectedFolder = f)),
               loading: () => const SizedBox(width: 180, child: Center(child: CircularProgressIndicator(color: kAccent))),
-              error: (_, __) => const SizedBox.shrink(),
+              error: (_, _) => const SizedBox.shrink(),
             ),
             Expanded(
               child: mapsAsync.when(
@@ -271,7 +271,7 @@ class _MapTile extends StatelessWidget {
           Expanded(
             child: Stack(fit: StackFit.expand, children: [
               Image.network(_mapThumbUrl(map), fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => const Center(child: Text('🗺', style: TextStyle(fontSize: 32, color: kT40)))),
+                  errorBuilder: (_, _, _) => const Center(child: Text('🗺', style: TextStyle(fontSize: 32, color: kT40)))),
               Positioned(
                 top: 4, right: 4,
                 child: DecoratedBox(
@@ -409,7 +409,7 @@ class _MapViewerDialogState extends State<_MapViewerDialog> {
                         ? child
                         : const Padding(padding: EdgeInsets.all(40),
                             child: CircularProgressIndicator(color: kAccent)),
-                    errorBuilder: (_, __, ___) => const Padding(
+                    errorBuilder: (_, _, _) => const Padding(
                       padding: EdgeInsets.all(40),
                       child: Text('Could not load this map.', style: TextStyle(color: kT55)),
                     ),

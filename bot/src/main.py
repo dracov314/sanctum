@@ -14,6 +14,7 @@ _COGS = [
     "src.cogs.dice",
     "src.cogs.session",
     "src.cogs.rolls",
+    "src.cogs.character",   # optional — absent from the public open-core build
 ]
 
 
@@ -25,8 +26,11 @@ class Lorekeeper(commands.Bot):
 
     async def setup_hook(self):
         for cog in _COGS:
-            await self.load_extension(cog)
-            log.info("Loaded cog: %s", cog)
+            try:
+                await self.load_extension(cog)
+                log.info("Loaded cog: %s", cog)
+            except commands.ExtensionNotFound:
+                log.info("Optional cog not present, skipping: %s", cog)
 
         if DISCORD_DEV_GUILD_ID:
             # Guild-scoped commands sync instantly; global ones can take up to

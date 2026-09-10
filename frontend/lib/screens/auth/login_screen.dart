@@ -32,7 +32,7 @@ class LoginScreen extends ConsumerWidget {
             cfg.when(
               loading: () => const SizedBox(
                   height: 24, width: 24, child: CircularProgressIndicator(strokeWidth: 2, color: kAccent)),
-              error: (_, __) => _SsoButton(
+              error: (_, _) => _SsoButton(
                   label: 'Sign in with SSO',
                   onTap: () => ref.read(authProvider.notifier).login()),
               data: (c) {

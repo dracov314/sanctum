@@ -54,7 +54,6 @@ const kFail = Color(0xFFC1443B);
 const kWarn = Color(0xFFD9822B);
 const kSuccess = Color(0xFF7FA65C);
 const kInfo = Color(0xFF5E8C86);
-const kResist = Color(0xFFB5615A);
 const kGmTag = Color(0xFFD9A441);
 const kDiscord = Color(0xFF5865F2); // Discord brand blurple, used for the relayed-log "DISCORD" tag
 
@@ -265,7 +264,7 @@ class SanctumPageHeader extends StatelessWidget {
           const SizedBox(height: 24),
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
             Flexible(child: Text(title, style: serif(20, color: kT100))),
-            if (trailing != null) trailing!,
+            ?trailing,
           ]),
           if (subtitle != null) ...[
             const SizedBox(height: 4),

@@ -1,0 +1,11 @@
+# Sanctum frontend analyzer config.
+# flutter_lints is the standard Flutter/Dart recommended set; it's already a
+# dev_dependency (pubspec.yaml). Publish CI runs `flutter analyze
+# --no-fatal-infos`, so infos surface without blocking.
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  errors:
+    # dart:html is deprecated in favour of package:web; migration is tracked
+    # (docs/cleanup-v1.0.md A6). Keep it visible as info, not a build failure.
+    deprecated_member_use: info
